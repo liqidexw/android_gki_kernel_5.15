@@ -9,16 +9,7 @@ source "$MODULE_DIR/common.sh"
 
 # Customize kernel version
 customize_version() {
-    # Generate AOSP-style git version
-    if git rev-parse --git-dir >/dev/null 2>&1; then
-        GIT_COUNT=$(git rev-list --count HEAD)
-        GIT_HASH=$(git rev-parse --short=12 HEAD)
-        GIT_VER=$(printf "%05d-g%s" "$GIT_COUNT" "$GIT_HASH")
-    else
-        GIT_VER="00021-g6f2f96be86b9"
-    fi
-
-    CUSTOM_VERSION="-android13-8-$GIT_VER-ab13729987"
+    CUSTOM_VERSION="-android13-8-00021-g6f2f96be86b9-ab13729987"
     
     log "Customizing Kernel Version to: $CUSTOM_VERSION"
     
