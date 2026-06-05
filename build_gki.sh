@@ -206,24 +206,16 @@ if [ "$SKIP_BUILD" = false ]; then
     # Note: Using Bazel --disk_cache instead of ccache for better performance
 
     # Set build timestamp for kernel version string
-    # This fixes the "Thu Jan 1 00:00:00 UTC 1970" issue
-    # SOURCE_DATE_EPOCH is used for reproducible builds, but we want actual build time
-    # 获取当前实际时间戳
-    CURRENT_TIME=$(date +%s)
-    # 将时间戳格式化为字符串
-    if command -v date >/dev/null 2>&1; then
-        # 尝试使用 GNU date (Linux)
-        BUILD_TIMESTAMP=$(date -u -d "@$CURRENT_TIME" "+%Y-%m-%d %H:%M:%S %Z" 2>/dev/null || \
-                         date -u -r "$CURRENT_TIME" "+%Y-%m-%d %H:%M:%S %Z" 2>/dev/null || \
-                         date -u "+%Y-%m-%d %H:%M:%S %Z")
-    else
-        BUILD_TIMESTAMP=$(date -u "+%Y-%m-%d %H:%M:%S %Z")
-    fi
+    # Fixed timestamp to match ROM build date
+    # 2025-09-20 00:00:00 UTC
     
+    CURRENT_TIME=1758326400
+    BUILD_TIMESTAMP="Sat Sep 20 00:00:00 UTC 2025"
+
     export SOURCE_DATE_EPOCH=$CURRENT_TIME
     export KBUILD_BUILD_TIMESTAMP="$BUILD_TIMESTAMP"
 
-    log "Using actual build timestamp: $BUILD_TIMESTAMP (epoch: $CURRENT_TIME)"
+    log "Using fixed build timestamp: $BUILD_TIMESTAMP (epoch: $CURRENT_TIME)"
     
     # 这些环境变量会传递给构建系统，确保内核版本信息中包含正确的时间戳
     BAZEL_TIMESTAMP_FLAGS="--action_env=KBUILD_BUILD_TIMESTAMP --action_env=SOURCE_DATE_EPOCH"
