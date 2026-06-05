@@ -194,7 +194,10 @@ if [ "$SKIP_BUILD" = false ]; then
     PREFIX_CMD="taskset -c $CPU_RANGE"
     
     log "🔒 Locking build process to CPU cores: $CPU_RANGE"
-    BAZEL_PERF_FLAGS="--jobs=$USE_CORES --local_cpu_resources=$USE_CORES"
+    BAZEL_PERF_FLAGS=(
+        "--jobs=$USE_CORES"
+        "--local_cpu_resources=$USE_CORES"
+    )
 
     # Start temperature monitoring
     start_temp_monitor
@@ -218,17 +221,37 @@ if [ "$SKIP_BUILD" = false ]; then
     log "Using fixed build timestamp: $BUILD_TIMESTAMP (epoch: $CURRENT_TIME)"
     
     # 这些环境变量会传递给构建系统，确保内核版本信息中包含正确的时间戳
-    BAZEL_TIMESTAMP_FLAGS="--action_env=KBUILD_BUILD_TIMESTAMP --action_env=SOURCE_DATE_EPOCH"
+    BAZEL_TIMESTAMP_FLAGS=(
+        "--action_env=KBUILD_BUILD_TIMESTAMP=$BUILD_TIMESTAMP"
+        "--action_env=SOURCE_DATE_EPOCH=$CURRENT_TIME"
+        "--repo_env=KBUILD_BUILD_TIMESTAMP=$BUILD_TIMESTAMP"
+        "--repo_env=SOURCE_DATE_EPOCH=$CURRENT_TIME"
+    )
 
     log "Build timestamp set to: $BUILD_TIMESTAMP"
 
     BAZEL_CACHE_DIR="$HOME/.bazel_cache"
+    if [ "$CLEAN_CACHE" = true ]; then
+        log "Cleaning Bazel disk cache: $BAZEL_CACHE_DIR"
+        rm -rf "$BAZEL_CACHE_DIR"
+    fi
     mkdir -p "$BAZEL_CACHE_DIR"
 
     log "Building with Bazel Native Disk Cache..."
     log "Cache directory: $BAZEL_CACHE_DIR ($(du -sh "$BAZEL_CACHE_DIR" 2>/dev/null | cut -f1 || echo 'N/A'))"
     
     cd "$WORKSPACE_DIR"
+
+    if [ "$CLEAN_CACHE" = true ]; then
+        log "Cleaning Bazel output base..."
+        tools/bazel clean --expunge || true
+    fi
+
+    # 清理旧 dist，避免 build 失败后继续拿旧 Image/boot.img 打包
+    if [ -d "$DIST_OUTPUT_DIR" ]; then
+        log "Cleaning old dist output: $DIST_OUTPUT_DIR"
+        rm -rf "$DIST_OUTPUT_DIR"
+    fi
 
     # 🔥 OPTIMIZATION: 使用 'run' 而不是 'build' 以便直接输出到 dist_dir
     # Bazel 缓存基于文件内容哈希，不依赖 git 状态
@@ -249,8 +272,8 @@ if [ "$SKIP_BUILD" = false ]; then
         --action_env=KMI_SYMBOL_LIST_STRICT_MODE=0 \
         --action_env=KMI_ENFORCED=0 \
         ${BAZEL_FLAGS} \
-        ${BAZEL_PERF_FLAGS} \
-        ${BAZEL_TIMESTAMP_FLAGS} \
+        "${BAZEL_PERF_FLAGS[@]}" \
+        "${BAZEL_TIMESTAMP_FLAGS[@]}" \
         --disk_cache="$BAZEL_CACHE_DIR" \
         //common:kernel_aarch64_dist \
         -- \
@@ -311,13 +334,26 @@ fi
 echo "Kernel Image: $IMAGE_PATH"
 
 # Verify version
+EXPECTED_VERSION_DATE="Sep 20"
+EXPECTED_VERSION_YEAR="2025"
+
 log "Verifying Kernel Version..."
 if [ -f "$IMAGE_PATH" ]; then
     # 如果是 gz 压缩的，需要 zcat
     if [[ "$IMAGE_PATH" == *.gz ]]; then
-        zcat "$IMAGE_PATH" | strings | grep "Linux version" | head -n 1
+        VERSION_LINE=$(zcat "$IMAGE_PATH" | strings | grep "Linux version" | head -n 1 || true)
     else
-        strings "$IMAGE_PATH" | grep "Linux version" | head -n 1
+        VERSION_LINE=$(strings "$IMAGE_PATH" | grep "Linux version" | head -n 1 || true)
+    fi
+
+    echo "$VERSION_LINE"
+
+    if [ -z "$VERSION_LINE" ]; then
+        warn "Linux version string not found in $IMAGE_PATH"
+    elif [ "$SKIP_BUILD" = false ] && ! echo "$VERSION_LINE" | grep -q "$EXPECTED_VERSION_DATE"; then
+        error "Kernel build timestamp mismatch. Expected $EXPECTED_VERSION_DATE $EXPECTED_VERSION_YEAR, but got: $VERSION_LINE"
+    elif [ "$SKIP_BUILD" = false ] && ! echo "$VERSION_LINE" | grep -q "$EXPECTED_VERSION_YEAR"; then
+        error "Kernel build timestamp year mismatch. Expected $EXPECTED_VERSION_YEAR, but got: $VERSION_LINE"
     fi
 else
     warn "Kernel Image not found at $IMAGE_PATH"
@@ -329,6 +365,11 @@ fi
 # ==============================================================================
 OUT_DIR="$SCRIPT_DIR/out"
 
+# 清理旧打包产物，避免误刷旧 boot.img / Image.gz / anykernel.zip
+if [ "$SKIP_BUILD" = false ]; then
+    rm -f "$OUT_DIR/Image.gz" "$OUT_DIR/boot.img" "$OUT_DIR/anykernel.zip"
+fi
+
 # Pack artifacts based on parameters
 if [ "$PACK_IMG" = true ]; then
     pack_image_artifacts
@@ -336,6 +377,19 @@ fi
 
 if [ "$PACK_AK3" = true ]; then
     pack_anykernel
+fi
+
+# Verify packed Image.gz to avoid flashing stale artifacts
+if [ "$PACK_IMG" = true ] && [ -f "$OUT_DIR/Image.gz" ]; then
+    log "Verifying Packed Image.gz Version..."
+    PACKED_VERSION_LINE=$(zcat "$OUT_DIR/Image.gz" | strings | grep "Linux version" | head -n 1 || true)
+    echo "$PACKED_VERSION_LINE"
+
+    if [ "$SKIP_BUILD" = false ] && ! echo "$PACKED_VERSION_LINE" | grep -q "$EXPECTED_VERSION_DATE"; then
+        error "Packed Image.gz timestamp mismatch. Expected $EXPECTED_VERSION_DATE $EXPECTED_VERSION_YEAR, but got: $PACKED_VERSION_LINE"
+    elif [ "$SKIP_BUILD" = false ] && ! echo "$PACKED_VERSION_LINE" | grep -q "$EXPECTED_VERSION_YEAR"; then
+        error "Packed Image.gz timestamp year mismatch. Expected $EXPECTED_VERSION_YEAR, but got: $PACKED_VERSION_LINE"
+    fi
 fi
 
 # Summary
