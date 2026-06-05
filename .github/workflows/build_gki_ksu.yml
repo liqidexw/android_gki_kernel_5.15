@@ -91,9 +91,23 @@ jobs:
         cd android_gki_kernel_5.15_common
         chmod +x build_gki.sh
         # 运行构建脚本，启用 KernelSU 支持
-        # 设置 Bazel 资源限制以防止 OOM
-        export BAZEL_FLAGS="--local_ram_resources=10240 --local_cpu_resources=4"
-        ./build_gki.sh --ksu
+        # 设置 Bazel 内存限制以防止 OOM，CPU 数量交给 build_gki.sh 的 --profile 控制
+        export BAZEL_FLAGS="--local_ram_resources=10240"
+        ./build_gki.sh --ksu --clean --profile 4
+
+    - name: Verify Kernel Timestamp
+      run: |
+        cd android_gki_kernel_5.15_common
+        VERSION_LINE=$(strings out/dist/Image | grep -m1 "Linux version" || true)
+        PACKED_VERSION_LINE=$(zcat out/Image.gz | strings | grep -m1 "Linux version" || true)
+
+        echo "dist/Image: $VERSION_LINE"
+        echo "out/Image.gz: $PACKED_VERSION_LINE"
+
+        echo "$VERSION_LINE" | grep -q "Sep 20"
+        echo "$VERSION_LINE" | grep -q "2025"
+        echo "$PACKED_VERSION_LINE" | grep -q "Sep 20"
+        echo "$PACKED_VERSION_LINE" | grep -q "2025"
 
     - name: Upload Kernel Artifacts
       uses: actions/upload-artifact@v4
