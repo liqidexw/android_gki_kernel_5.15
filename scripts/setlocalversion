@@ -111,7 +111,6 @@ scm_version()
 			git --no-optional-locks status -uno --porcelain 2>/dev/null ||
 			git diff-index --name-only HEAD
 		} | read dummy; then
-			printf '%s' -dirty
 		fi
 	fi
 }
